@@ -119,6 +119,8 @@ set(NET_SOURCES
     net/ChecksumValidator.h
     net/Download.cpp
     net/Download.h
+    net/DownloadSource.cpp
+    net/DownloadSource.h
     net/DummySink.h
     net/FileSink.cpp
     net/FileSink.h

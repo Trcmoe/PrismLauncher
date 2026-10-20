@@ -1,5 +1,8 @@
 project(tests)
 
+ecm_add_test(DownloadSource_test.cpp LINK_LIBRARIES Launcher_logic Qt${QT_VERSION_MAJOR}::Test Qt${QT_VERSION_MAJOR}::Network
+    TEST_NAME DownloadSource)
+
 ecm_add_test(FileSystem_test.cpp LINK_LIBRARIES Launcher_logic Qt${QT_VERSION_MAJOR}::Test
     TEST_NAME FileSystem)
 

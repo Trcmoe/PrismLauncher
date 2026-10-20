@@ -103,18 +103,30 @@ void NetRequest::executeTask()
     }
 
 #if defined(LAUNCHER_APPLICATION)
-    auto user_agent = APPLICATION->getUserAgent();
+    auto user_agent = APPLICATION_DYN ? APPLICATION->getUserAgent() : BuildConfig.USER_AGENT;
 #else
     auto user_agent = BuildConfig.USER_AGENT;
 #endif
 
     request.setHeader(QNetworkRequest::UserAgentHeader, user_agent.toUtf8());
-    for (auto& header_proxy : m_headerProxies) {
-        header_proxy->writeHeaders(request);
+    if (!m_officialFallbackUrl.isEmpty()) {
+        // Mirrors only receive the public GET. Do not attach API tokens or account cookies.
+        request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
+        request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
+        // Conditional headers from an official cache entry cannot validate a different server's body.
+        request.setRawHeader("If-None-Match", {});
+        request.setRawHeader("If-Modified-Since", {});
+    } else {
+        for (auto& header_proxy : m_headerProxies) {
+            header_proxy->writeHeaders(request);
+        }
     }
 
 #if defined(LAUNCHER_APPLICATION)
-    request.setTransferTimeout(APPLICATION->settings()->get("RequestTimeout").toInt() * 1000);
+    if (APPLICATION_DYN)
+        request.setTransferTimeout(APPLICATION->settings()->get("RequestTimeout").toInt() * 1000);
+    else
+        request.setTransferTimeout();
 #else
     request.setTransferTimeout();
 #endif
@@ -169,7 +181,7 @@ void NetRequest::downloadError(QNetworkReply::NetworkError error)
     if (error == QNetworkReply::OperationCanceledError) {
         qCCritical(logCat) << getUid().toString() << "Aborted" << m_url.toString();
         m_state = State::Failed;
-    } else if (replyStatusCode() == 429 /* HTTP Too Many Requests*/ && m_options & Option::AutoRetry) {
+    } else if (m_officialFallbackUrl.isEmpty() && replyStatusCode() == 429 /* HTTP Too Many Requests*/ && m_options & Option::AutoRetry) {
         qCDebug(logCat) << getUid().toString() << "Rate Limited!";
         int64_t delay = 10 * std::pow(2, m_retryCount);
         if (m_reply->hasRawHeader("Retry-After")) {
@@ -184,7 +196,7 @@ void NetRequest::downloadError(QNetworkReply::NetworkError error)
         }
         handleAutoRetry(delay);
     } else {
-        if (m_options & Option::AcceptLocalFiles) {
+        if (m_officialFallbackUrl.isEmpty() && m_options & Option::AcceptLocalFiles) {
             if (m_sink->hasLocalData()) {
                 m_state = State::Succeeded;
                 return;
@@ -310,6 +322,8 @@ void NetRequest::downloadFinished()
     } else if (m_state == State::Failed) {
         qCDebug(logCat) << getUid().toString() << "Request failed in previous step:" << m_url.toString();
         m_sink->abort();
+        if (retryOfficial())
+            return;
         m_failReason = m_reply->errorString();
         emit failed(m_reply->errorString());
         emit finished();
@@ -330,6 +344,8 @@ void NetRequest::downloadFinished()
         if (m_state != State::Succeeded) {
             qCDebug(logCat) << getUid().toString() << "Request failed to write:" << m_url.toString();
             m_sink->abort();
+            if (retryOfficial())
+                return;
             m_failReason = m_sink->failReason();
             emit failed(m_sink->failReason());
             emit finished();
@@ -342,6 +358,8 @@ void NetRequest::downloadFinished()
     if (m_state != State::Succeeded) {
         qCDebug(logCat) << getUid().toString() << "Request failed to finalize:" << m_url.toString();
         m_sink->abort();
+        if (retryOfficial())
+            return;
         m_failReason = m_sink->failReason();
         emit failed(m_sink->failReason());
         emit finished();
@@ -393,6 +411,33 @@ QNetworkReply::NetworkError NetRequest::error() const
 QUrl NetRequest::url() const
 {
     return m_url;
+}
+
+void NetRequest::useMirror(const QUrl& mirror)
+{
+    if (m_officialFallbackUrl.isEmpty() && !mirror.isEmpty() && mirror != m_url) {
+        m_officialFallbackUrl = m_url;
+        m_url = mirror;
+    }
+}
+
+auto NetRequest::retryOfficial() -> bool
+{
+    if (m_officialFallbackUrl.isEmpty() || m_state == State::AbortedByUser) {
+        return false;
+    }
+    qCWarning(logCat) << getUid().toString() << "Mirror failed, retrying official URL" << m_officialFallbackUrl.toString();
+    m_url = m_officialFallbackUrl;
+    m_officialFallbackUrl.clear();
+    m_errorResponse.clear();
+    m_retryTimer.stop();
+    m_retryCount = 0;
+    m_state = State::Running;
+    // The finished signal is currently being delivered from this reply.
+    auto* oldReply = m_reply.release();
+    oldReply->deleteLater();
+    executeTask();
+    return true;
 }
 
 QString NetRequest::errorString() const

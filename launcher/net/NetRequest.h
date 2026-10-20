@@ -40,8 +40,8 @@
 #pragma once
 
 #include <QNetworkReply>
-#include <QUrl>
 #include <QTimer>
+#include <QUrl>
 #include <chrono>
 
 #include "HeaderProxy.h"
@@ -77,12 +77,15 @@ class NetRequest : public Task {
 
     QUrl url() const;
     void setUrl(QUrl url) { m_url = url; }
+    // Use the mirror for the first attempt and retry the original once on failure.
+    void useMirror(const QUrl& mirror);
     int replyStatusCode() const;
     QNetworkReply::NetworkError error() const;
     QString errorString() const;
 
    private:
     auto handleRedirect() -> bool;
+    auto retryOfficial() -> bool;
     void handleAutoRetry(int64_t delay);
     virtual QNetworkReply* getReply(QNetworkRequest&) = 0;
 
@@ -113,6 +116,7 @@ class NetRequest : public Task {
 
     /// source URL
     QUrl m_url;
+    QUrl m_officialFallbackUrl;
     std::vector<std::unique_ptr<Net::HeaderProxy>> m_headerProxies;
 
     int m_retryCount = 0;

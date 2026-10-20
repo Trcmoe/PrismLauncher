@@ -1,4 +1,5 @@
 #include <QDir>
+#include <QFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -41,35 +42,14 @@ class LinkTask : public Task {
     void executeTask() override
     {
         if (!(*m_lnk)()) {
-#if defined Q_OS_WIN32
-            if (!m_useHard) {
-                qDebug() << "EXPECTED: Link failure, Windows requires permissions for symlinks";
-
-                qDebug() << "atempting to run with privelage";
-                connect(m_lnk, &FS::create_link::finishedPrivileged, this, [this](bool gotResults) {
-                    if (gotResults) {
-                        emitSucceeded();
-                    } else {
-                        qDebug() << "Privileged run exited without results!";
-                        emitFailed();
-                    }
-                });
-                m_lnk->runPrivileged();
-            } else {
-                qDebug() << "Link Failed!" << m_lnk->getOSError().value() << m_lnk->getOSError().message().c_str();
-            }
-#else
-            qDebug() << "Link Failed!" << m_lnk->getOSError().value() << m_lnk->getOSError().message().c_str();
-#endif
+            const auto error = m_lnk->getOSError();
+            emitFailed(QString::fromStdString(error.message()));
         } else {
             emitSucceeded();
         }
     }
 
     FS::create_link* m_lnk;
-#if defined Q_OS_WIN32
-    bool m_useHard = false;
-#endif
     bool m_linkRecursive = true;
 };
 
@@ -81,6 +61,33 @@ class FileSystemTest : public QObject {
     const QString leadingSlash = "/foo";
 
    private slots:
+    void init()
+    {
+#if defined(Q_OS_WIN)
+        const auto* test = QTest::currentTestFunction();
+        if (!test || !QString::fromLatin1(test).startsWith("test_link"))
+            return;
+
+        // Probe both link types without elevation before running symlink tests.
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        QFile sourceFile(tempDir.filePath("source-file"));
+        QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+        sourceFile.close();
+        const auto sourceDir = tempDir.filePath("source-dir");
+        QVERIFY(QDir().mkdir(sourceDir));
+
+        std::error_code fileError;
+        std::error_code dirError;
+        fs::create_symlink(fs::path(StringUtils::toStdString(sourceFile.fileName())),
+                           fs::path(StringUtils::toStdString(tempDir.filePath("file-link"))), fileError);
+        fs::create_directory_symlink(fs::path(StringUtils::toStdString(sourceDir)),
+                                     fs::path(StringUtils::toStdString(tempDir.filePath("dir-link"))), dirError);
+        if (fileError || dirError)
+            QSKIP("Windows symlink creation is unavailable in this test environment.");
+#endif
+    }
+
     void test_pathCombine()
     {
         QCOMPARE(QString("/foo/foo"), FS::PathCombine(bothSlash, bothSlash));

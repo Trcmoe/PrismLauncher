@@ -1,3 +1,9 @@
+## BMCLAPI 下载源定制版
+
+基于 Prism Launcher **11.1.1**，加入 **Official / BMCLAPI / Custom** 下载源切换。Windows x64 便携版见本仓库的 [Releases](https://github.com/Trcmoe/PrismLauncher/releases)，使用方式见[说明](docs/BMCLAPIRelease.md)。这是独立社区 fork；游戏本体、资源索引、资源文件和 Mojang 支持库支持镜像，失败后回退官方源。
+
+The original upstream project information follows.
+
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="/program_info/org.prismlauncher.PrismLauncher.logo-darkmode.svg">

@@ -37,6 +37,8 @@
 
 #include "NetJob.h"
 #include <QNetworkReply>
+#include "net/Download.h"
+#include "net/DownloadSource.h"
 #include "net/NetRequest.h"
 #include "tasks/ConcurrentTask.h"
 #if defined(LAUNCHER_APPLICATION)
@@ -58,6 +60,20 @@ NetJob::NetJob(QString job_name, QNetworkAccessManager* network, int max_concurr
 auto NetJob::addNetAction(Net::NetRequest::Ptr action) -> bool
 {
     action->setNetwork(m_network);
+
+#if defined(LAUNCHER_APPLICATION)
+    // Only GET downloads on the explicit Mojang artifact allowlist can use a mirror.
+    if (APPLICATION_DYN) {
+        if (auto* download = dynamic_cast<Net::Download*>(action.get())) {
+            auto* settings = APPLICATION->settings();
+            const auto type = static_cast<Net::DownloadSource::Type>(settings->get("MinecraftDownloadSource").toInt());
+            const auto base = Net::DownloadSource::baseUrl(type, settings->get("MinecraftCustomDownloadBase").toString());
+            const auto mirror =
+                Net::DownloadSource::mirrorUrl(download->url(), base, !settings->get("ResourceURLOverride").toString().isEmpty());
+            download->useMirror(mirror);
+        }
+    }
+#endif
 
     addTask(action);
 

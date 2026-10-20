@@ -49,6 +49,7 @@
 
 #include "Application.h"
 #include "BuildConfig.h"
+#include "net/DownloadSource.h"
 #include "net/PasteUpload.h"
 #include "settings/SettingsObject.h"
 #include "tools/BaseProfiler.h"
@@ -64,6 +65,14 @@ APIPage::APIPage(QWidget* parent) : QWidget(parent), ui(new Ui::APIPage)
         QRegularExpression::anchoredPattern("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
 
     ui->setupUi(this);
+
+    ui->minecraftDownloadSource->addItem(tr("Official"), static_cast<int>(Net::DownloadSource::Type::Official));
+    ui->minecraftDownloadSource->addItem(tr("BMCLAPI"), static_cast<int>(Net::DownloadSource::Type::BMCLAPI));
+    ui->minecraftDownloadSource->addItem(tr("Custom"), static_cast<int>(Net::DownloadSource::Type::Custom));
+    connect(ui->minecraftDownloadSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        ui->minecraftCustomDownloadBase->setEnabled(ui->minecraftDownloadSource->currentData().toInt() ==
+                                                    static_cast<int>(Net::DownloadSource::Type::Custom));
+    });
 
     for (auto pasteType : comboBoxEntries) {
         ui->pasteTypeComboBox->addItem(PasteUpload::PasteTypes.at(pasteType).name, pasteType);
@@ -154,6 +163,12 @@ void APIPage::loadSettings()
     QString customUserAgent = s->get("UserAgentOverride").toString();
     ui->userAgentLineEdit->setText(customUserAgent);
     ui->technicClientID->setText(s->get("TechnicClientID").toString());
+
+    const int sourceIndex = ui->minecraftDownloadSource->findData(s->get("MinecraftDownloadSource").toInt());
+    ui->minecraftDownloadSource->setCurrentIndex(sourceIndex < 0 ? 0 : sourceIndex);
+    ui->minecraftCustomDownloadBase->setText(s->get("MinecraftCustomDownloadBase").toString());
+    ui->minecraftCustomDownloadBase->setEnabled(ui->minecraftDownloadSource->currentData().toInt() ==
+                                                static_cast<int>(Net::DownloadSource::Type::Custom));
 }
 
 void APIPage::applySettings()
@@ -202,10 +217,19 @@ void APIPage::applySettings()
     s->set("ModrinthToken", modrinthToken);
     s->set("UserAgentOverride", ui->userAgentLineEdit->text());
     s->set("TechnicClientID", ui->technicClientID->text());
+    s->set("MinecraftDownloadSource", ui->minecraftDownloadSource->currentData().toInt());
+    s->set("MinecraftCustomDownloadBase", ui->minecraftCustomDownloadBase->text().trimmed());
 }
 
 bool APIPage::apply()
 {
+    if (ui->minecraftDownloadSource->currentData().toInt() == static_cast<int>(Net::DownloadSource::Type::Custom) &&
+        !Net::DownloadSource::validCustomBase(ui->minecraftCustomDownloadBase->text().trimmed())) {
+        QMessageBox::warning(this, tr("Invalid download source"),
+                             tr("Enter a BMCLAPI-compatible HTTPS base URL without credentials, a query, or a fragment."));
+        ui->minecraftCustomDownloadBase->setFocus();
+        return false;
+    }
     applySettings();
     return true;
 }
@@ -213,4 +237,7 @@ bool APIPage::apply()
 void APIPage::retranslate()
 {
     ui->retranslateUi(this);
+    ui->minecraftDownloadSource->setItemText(0, tr("Official"));
+    ui->minecraftDownloadSource->setItemText(1, tr("BMCLAPI"));
+    ui->minecraftDownloadSource->setItemText(2, tr("Custom"));
 }

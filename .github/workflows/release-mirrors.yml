@@ -1,0 +1,143 @@
+name: Release BMCLAPI fork (Windows x64)
+
+on:
+  push:
+    tags:
+      - 'bmclapi-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (empty creates a unique bmclapi-* tag for this run)'
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: bmclapi-release-${{ github.ref }}-${{ inputs.tag || 'automatic' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.tag.outputs.release_tag }}
+    env:
+      BUILD_PLATFORM: community-bmclapi
+      ARTIFACT_NAME: ''
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Choose release tag
+        id: tag
+        shell: pwsh
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:EVENT_NAME -eq 'push') {
+            $tag = $env:REF_NAME
+          } elseif ($env:REQUESTED_TAG) {
+            $tag = $env:REQUESTED_TAG.Trim()
+          } else {
+            $shortSha = (git rev-parse --short=12 HEAD).Trim()
+            $tag = "bmclapi-11.1.1-g$shortSha-run$env:GITHUB_RUN_NUMBER-a$env:GITHUB_RUN_ATTEMPT"
+          }
+          if ($tag -cnotmatch '^bmclapi-[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Release tag must begin with bmclapi- and contain only ASCII letters, digits, dots, underscores, or hyphens."
+          }
+          $existingTags = @(git tag --list $tag)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($existingTags -contains $tag) {
+            $tagCommit = (git rev-parse "${tag}^{commit}").Trim()
+            if ($tagCommit -ne $env:GITHUB_SHA) {
+              throw "Release tag $tag does not point to this build commit."
+            }
+          }
+          "release_tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Set up MSVC, Qt, Java and vcpkg
+        uses: ./.github/actions/setup-dependencies
+        with:
+          build-type: Release
+          artifact-name: Windows-MSVC-BMCLAPI
+          vcvars-arch: amd64
+          qt-version: 6.10.2
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake --preset windows_msvc -DLauncher_BUILD_ARTIFACT= -DLauncher_UPDATER_GITHUB_REPO=
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          cmake --build --preset windows_msvc --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run all CTest tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure --timeout 120 --output-junit build/test-results.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install, bundle and smoke-test portable package
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
+        run: |
+          ./scripts/package-mirrors.ps1 -ReleaseTag $env:RELEASE_TAG
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: bmclapi-release-files
+          path: |
+            dist/*.zip
+            dist/*.patch
+            dist/SHA256SUMS.txt
+            dist/SOURCE.txt
+            dist/RELEASE_NOTES.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated release files
+        uses: actions/download-artifact@v8
+        with:
+          name: bmclapi-release-files
+          path: dist
+
+      - name: Publish fork release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            "dist/PrismLauncher-BMCLAPI-Windows-x64-$RELEASE_TAG.zip" \
+            "dist/PrismLauncher-BMCLAPI-$RELEASE_TAG.patch" \
+            "dist/SHA256SUMS.txt" \
+            "dist/SOURCE.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Prism Launcher BMCLAPI fork $RELEASE_TAG" \
+            --notes-file "dist/RELEASE_NOTES.md" \
+            --latest=false

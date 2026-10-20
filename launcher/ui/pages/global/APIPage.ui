@@ -98,6 +98,58 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="groupBox_minecraftDownloads">
+         <property name="title">
+          <string>Minecraft Downloads</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_minecraftDownloads">
+          <item>
+           <widget class="QLabel" name="minecraftDownloadSourceLabel">
+            <property name="text">
+             <string>Download source</string>
+            </property>
+            <property name="buddy">
+             <cstring>minecraftDownloadSource</cstring>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="minecraftDownloadSource"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="minecraftCustomDownloadBaseLabel">
+            <property name="text">
+             <string>Custom BMCLAPI-compatible HTTPS base URL</string>
+            </property>
+            <property name="buddy">
+             <cstring>minecraftCustomDownloadBase</cstring>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="minecraftCustomDownloadBase">
+            <property name="placeholderText">
+             <string>https://mirror.example.com/minecraft</string>
+            </property>
+            <property name="clearButtonEnabled">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="minecraftDownloadNote">
+            <property name="text">
+             <string>Mirrors cover Mojang game files, asset indexes, assets and libraries. Failed mirror downloads retry the official URL. Metadata and Assets Server overrides take precedence; account and authentication traffic stays on its original service.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="groupBox_meta">
          <property name="title">
           <string>Meta&amp;data Server</string>
