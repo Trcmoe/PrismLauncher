@@ -64,6 +64,8 @@ foreach ($requiredPath in @($exe, (Join-Path $packageRoot 'portable.txt'),
 }
 
 # --version exits during command-line parsing; the data directory is isolated.
+# Qt otherwise displays a modal version message box on a Windows runner without
+# a console. Keep the real Windows platform plugin and capture diagnostics.
 $smokeDir = Join-Path $env:RUNNER_TEMP "prism-bmclapi-smoke-$ReleaseTag"
 New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -71,8 +73,11 @@ $startInfo.FileName = $exe
 $startInfo.WorkingDirectory = $packageRoot
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
+$startInfo.RedirectStandardOutput = $true
+$startInfo.RedirectStandardError = $true
+$startInfo.Environment['QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES'] = '1'
 $startInfo.Environment['PATH'] = "$packageRoot;$env:SystemRoot\System32;$env:SystemRoot"
-foreach ($key in @('QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH')) {
+foreach ($key in @('QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QT_QPA_PLATFORM', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH')) {
     [void]$startInfo.Environment.Remove($key)
 }
 $startInfo.ArgumentList.Add('--dir')
@@ -80,13 +85,23 @@ $startInfo.ArgumentList.Add($smokeDir)
 $startInfo.ArgumentList.Add('--version')
 $process = [System.Diagnostics.Process]::Start($startInfo)
 try {
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit(15000)) {
         $process.Kill($true)
-        throw 'Packaged launcher --version timed out.'
+        $process.WaitForExit()
+        throw "Packaged launcher --version timed out. $($stderrTask.GetAwaiter().GetResult())"
     }
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) {
-        throw "Packaged launcher --version failed with exit code $($process.ExitCode)."
+        throw "Packaged launcher --version failed with exit code $($process.ExitCode). $stderr"
     }
+    $builtCommit = (git rev-parse HEAD).Trim()
+    if ($stdout -notmatch 'PrismLauncher 11\.1\.1' -or -not $stdout.Contains($builtCommit)) {
+        throw "Packaged launcher reported an unexpected version. stdout: $stdout stderr: $stderr"
+    }
+    Write-Output "Packaged launcher smoke check passed: $($stdout.Trim())"
 } finally {
     $process.Dispose()
 }
